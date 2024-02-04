@@ -1,39 +1,31 @@
 import os
 import regex
 
-
-class Parser:
+class StreamParser:
 
     def __init__(self, path_stream):
         self.path_stream = path_stream
 
-        self.marker_dict = {
-            "CHUNK_START"      : r"----- Begin chunk -----",
-            "CHUNK_END"        : r"----- End chunk -----",
-            "GEOM_START"       : r"----- Begin geometry file -----",
-            "GEOM_END"         : r"----- End geometry file -----",
-            "PEAK_LIST_START"  : r"Peaks from peak search",
-            "PEAK_LIST_END"    : r"End of peak list",
-            "CRYSTAL_START"    : r"--- Begin crystal",
-            "CRYSTAL_END"      : r"--- End crystal",
-            "REFLECTION_START" : r"Reflections measured after indexing",
-            "REFLECTION_END"   : r"End of reflections",
-        }
+        self.block_pattern_dict = None
+        self.kv_pattern_dict    = None
+        self.peak_pattern_dict  = None
+        self.init_regex()
 
-        self.regex_dict = self.init_regex()
-
-        # Keep results in stream_dict...
-        self.stream_dict = {}
+        self.stream_record_list = []
 
 
     def init_regex(self):
         # Macro regex to parse blocks...
         block_pattern_dict = {
-            'geometry'       : regex.compile( r"(?s)----- Begin geometry file -----\n(?P<BLOCK>.*?)\n----- End geometry file -----" ),
-            'chunk'          : regex.compile( r"(?s)----- Begin chunk -----\n(?P<BLOCK>.*?)\n----- End chunk -----" ),
-            'crystal'        : regex.compile( r"(?s)--- Begin crystal\n(?P<BLOCK>.*?)\n--- End crystal" ),
-            'found peak'     : regex.compile( r"(?s)Peaks from peak search\n(?P<BLOCK>.*?)\nEnd of peak list" ),
-            'predicted peak' : regex.compile( r"(?s)Reflections measured after indexing\n(?P<BLOCK>.*?)\nEnd of reflections" ),
+            'geometry'            : regex.compile( r"(?s)----- Begin geometry file -----\n(?P<BLOCK>.*?)\n----- End geometry file -----" ),
+
+            'chunk'               : regex.compile( r"(?s)----- Begin chunk -----\n(?P<BLOCK>.*?)\n----- End chunk -----" ),
+            'found peak meta'     : regex.compile( r"(?s)(?P<BLOCK>.*?)Peaks from peak search" ),
+            'found peak'          : regex.compile( r"(?s)Peaks from peak search\n(?P<BLOCK>.*?)\nEnd of peak list" ),
+
+            'crystal'             : regex.compile( r"(?s)--- Begin crystal\n(?P<BLOCK>.*?)\n--- End crystal" ),
+            'predicted peak meta' : regex.compile( r"(?s)(?P<BLOCK>.*?)\nReflections measured after indexing" ),
+            'predicted peak'      : regex.compile( r"(?s)Reflections measured after indexing\n(?P<BLOCK>.*?)\nEnd of reflections" ),
         }
 
         # Micro regex...
@@ -123,28 +115,97 @@ class Parser:
             ),
         }
 
-        ## # Parse detector gemoetry...
-        ## regex_dict['geom'] = regex.compile(
-        ##     r"""
-        ##     (?x)
-        ##     # Match the pattern below
-        ##     (?> (?&DET_PANEL) / ) (?&COORD)
-        ##     \s = \s    # Match a equal sign with blank spaces on both sides
-        ##     (?&VALUE)  # Match the value of the coordinate
+        self.block_pattern_dict = block_pattern_dict
+        self.kv_pattern_dict    = kv_pattern_dict
+        self.peak_pattern_dict  = peak_pattern_dict
 
-        ##     (?(DEFINE)
-        ##         (?<DET_PANEL>
-        ##             [0-9a-zA-Z]+
-        ##         )
-        ##         (?<COORD>
-        ##             (?:min_fs)
-        ##         |   (?:min_ss)
-        ##         |   (?:max_fs)
-        ##         |   (?:max_ss)
-        ##         )
-        ##         (?<VALUE> [0-9]+ $)
-        ##     )
-        ##     """
-        ## )
 
-        return block_pattern_dict, kv_pattern_dict, peak_pattern_dict
+    def parse(self):
+        path_stream        = self.path_stream
+        block_pattern_dict = self.block_pattern_dict
+        kv_pattern_dict    = self.kv_pattern_dict
+        peak_pattern_dict  = self.peak_pattern_dict
+
+        with open(path_stream,'r') as fh:
+            data = fh.read()
+
+        stream_record_list = []
+        for match in regex.finditer(block_pattern_dict['chunk'], data):
+            capture_dict = match.capturesdict()
+            chunk_block_content = capture_dict['BLOCK'][0]    # ['MATCHED STRING']
+
+            # Enter 'found peak meta' block...
+            chunk_kv_record = {}
+            match = regex.search(block_pattern_dict['found peak meta'], chunk_block_content)
+            if match is not None:
+                # Extract key-value pairs (represented by both : and =)...
+                capture_dict = match.capturesdict()
+                content = capture_dict['BLOCK'][0]
+                for delimiter, kv_pattern in kv_pattern_dict.items():
+                    kv_pattern = kv_pattern_dict[delimiter]
+                    for kv_match in regex.finditer(kv_pattern, content):
+                        capture_dict = kv_match.capturesdict()
+
+                        k = capture_dict['LEFT'][0]
+                        v = capture_dict['RIGHT'][0]
+
+                        chunk_kv_record[k] = v
+
+            # Enter 'found peak' block...
+            found_peaks = []
+            match = regex.search(block_pattern_dict['found peak'], chunk_block_content)
+            if match is not None:
+                # Extract peak info...
+                capture_dict = match.capturesdict()
+                content = capture_dict['BLOCK'][0]
+                for match in regex.finditer(peak_pattern_dict['found peak'], content):
+                    capture_dict = match.capturesdict()
+                    found_peaks.append(capture_dict)
+
+            # Enter 'crystal' block...
+            crystal_list = []
+            for match in regex.finditer(block_pattern_dict['crystal'], chunk_block_content):
+                capture_dict = match.capturesdict()
+                crystal_block_content = capture_dict['BLOCK'][0]
+
+                # Enter 'predicted peak meta' block...
+                kv_record = {}
+                match = regex.search(block_pattern_dict['predicted peak meta'], crystal_block_content)
+                if match is not None:
+                    # Extract key-value pairs (represented by both : and =)...
+                    capture_dict = match.capturesdict()
+                    content = capture_dict['BLOCK'][0]
+                    for delimiter, kv_pattern in kv_pattern_dict.items():
+                        kv_pattern = kv_pattern_dict[delimiter]
+                        for kv_match in regex.finditer(kv_pattern, content):
+                            capture_dict = kv_match.capturesdict()
+
+                            k = capture_dict['LEFT'][0]
+                            v = capture_dict['RIGHT'][0]
+
+                            kv_record[k] = v
+
+                # Enter 'predicted peak' block...
+                predicted_peaks = []
+                match = regex.search(block_pattern_dict['predicted peak'], crystal_block_content)
+                if match is not None:
+                    # Extract peak info...
+                    capture_dict = match.capturesdict()
+                    content = capture_dict['BLOCK'][0]
+                    for match in regex.finditer(peak_pattern_dict['predicted peak'], content):
+                        capture_dict = match.capturesdict()
+                        predicted_peaks.append(capture_dict)
+
+                crystal_list.append({
+                    'metadata' : kv_record,
+                    'predicted peaks' : predicted_peaks,
+                })
+
+
+            stream_record_list.append({
+                'metadata' : chunk_kv_record,
+                'found peaks' : found_peaks,
+                'crystal'  : crystal_list,
+            })
+
+        self.stream_record_list = stream_record_list
