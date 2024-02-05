@@ -1,5 +1,7 @@
-import os
 import regex
+import signal
+import sys
+import ray
 
 class StreamParser:
 
@@ -207,5 +209,136 @@ class StreamParser:
                 'found peaks' : found_peaks,
                 'crystal'  : crystal_list,
             })
+
+        self.stream_record_list = stream_record_list
+
+
+    def parallel_parse(self, num_cpus = 2):
+        # Shutdown ray clients during a Ctrl+C event...
+        def signal_handler(sig, frame):
+            print('SIGINT (Ctrl+C) caught, shutting down Ray...')
+            ray.shutdown()
+            sys.exit(0)
+
+        signal.signal(signal.SIGINT, signal_handler)
+
+        # Init ray...
+        ray.init(num_cpus = num_cpus)
+
+        # Unpack attributes...
+        path_stream        = self.path_stream
+        block_pattern_dict = self.block_pattern_dict
+        kv_pattern_dict    = self.kv_pattern_dict
+        peak_pattern_dict  = self.peak_pattern_dict
+
+        # Define subroutine to process one chunk...
+        def parse_one_chunk(chunk_block_content):
+            # Enter 'found peak meta' block...
+            chunk_kv_record = {}
+            match = regex.search(block_pattern_dict['found peak meta'], chunk_block_content)
+            if match is not None:
+                # Extract key-value pairs (represented by both : and =)...
+                capture_dict = match.capturesdict()
+                content = capture_dict['BLOCK'][0]
+                for delimiter, kv_pattern in kv_pattern_dict.items():
+                    kv_pattern = kv_pattern_dict[delimiter]
+                    for kv_match in regex.finditer(kv_pattern, content):
+                        capture_dict = kv_match.capturesdict()
+
+                        k = capture_dict['LEFT'][0]
+                        v = capture_dict['RIGHT'][0]
+
+                        chunk_kv_record[k] = v
+
+            # Enter 'found peak' block...
+            found_peaks = []
+            match = regex.search(block_pattern_dict['found peak'], chunk_block_content)
+            if match is not None:
+                # Extract peak info...
+                capture_dict = match.capturesdict()
+                content = capture_dict['BLOCK'][0]
+                for match in regex.finditer(peak_pattern_dict['found peak'], content):
+                    capture_dict = match.capturesdict()
+                    found_peaks.append(capture_dict)
+
+            # Enter 'crystal' block...
+            crystal_list = []
+            for match in regex.finditer(block_pattern_dict['crystal'], chunk_block_content):
+                capture_dict = match.capturesdict()
+                crystal_block_content = capture_dict['BLOCK'][0]
+
+                # Enter 'predicted peak meta' block...
+                kv_record = {}
+                match = regex.search(block_pattern_dict['predicted peak meta'], crystal_block_content)
+                if match is not None:
+                    # Extract key-value pairs (represented by both : and =)...
+                    capture_dict = match.capturesdict()
+                    content = capture_dict['BLOCK'][0]
+                    for delimiter, kv_pattern in kv_pattern_dict.items():
+                        kv_pattern = kv_pattern_dict[delimiter]
+                        for kv_match in regex.finditer(kv_pattern, content):
+                            capture_dict = kv_match.capturesdict()
+
+                            k = capture_dict['LEFT'][0]
+                            v = capture_dict['RIGHT'][0]
+
+                            kv_record[k] = v
+
+                # Enter 'predicted peak' block...
+                predicted_peaks = []
+                match = regex.search(block_pattern_dict['predicted peak'], crystal_block_content)
+                if match is not None:
+                    # Extract peak info...
+                    capture_dict = match.capturesdict()
+                    content = capture_dict['BLOCK'][0]
+                    for match in regex.finditer(peak_pattern_dict['predicted peak'], content):
+                        capture_dict = match.capturesdict()
+                        predicted_peaks.append(capture_dict)
+
+                crystal_list.append({
+                    'metadata' : kv_record,
+                    'predicted peaks' : predicted_peaks,
+                })
+
+
+            stream_record = {
+                'metadata'    : chunk_kv_record,
+                'found peaks' : found_peaks,
+                'crystal'     : crystal_list,
+            }
+
+            return stream_record
+
+        # Define the work load for each worker...
+        @ray.remote
+        def parse_chunks(chunks):
+            stream_record_list = []
+            for chunk in chunks:
+                stream_record = parse_one_chunk(chunk)
+                stream_record_list.append(stream_record)
+            return stream_record_list
+
+        with open(path_stream,'r') as fh:
+            data = fh.read()
+
+        batch_size               = num_cpus
+        chunk_block_content_list = [ match.capturesdict()['BLOCK'][0] for match in regex.finditer(block_pattern_dict['chunk'], data) ]
+        chunk_block_batches      = [chunk_block_content_list[i:i + batch_size] for i in range(0, len(chunk_block_content_list), batch_size)]
+
+        # Register the computation at remote nodes...
+        futures = [parse_chunks.remote(batch) for batch in chunk_block_batches]
+
+        stream_record_list = []
+        remaining_futures = futures
+        while remaining_futures:
+            # Wait for at least one task to be ready
+            ready_futures, remaining_futures = ray.wait(remaining_futures, num_returns=1, timeout=None)
+
+            # Fetch the result of the ready task(s)
+            for future in ready_futures:
+                stream_record_list_per_worker = ray.get(future)
+                stream_record_list.extend(stream_record_list_per_worker)
+
+        ray.shutdown()
 
         self.stream_record_list = stream_record_list
