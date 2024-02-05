@@ -3,6 +3,8 @@ import signal
 import sys
 import ray
 
+from .utils import split_list_into_chunk
+
 class StreamParser:
 
     def __init__(self, path_stream):
@@ -321,9 +323,8 @@ class StreamParser:
         with open(path_stream,'r') as fh:
             data = fh.read()
 
-        batch_size               = num_cpus
         chunk_block_content_list = [ match.capturesdict()['BLOCK'][0] for match in regex.finditer(block_pattern_dict['chunk'], data) ]
-        chunk_block_batches      = [chunk_block_content_list[i:i + batch_size] for i in range(0, len(chunk_block_content_list), batch_size)]
+        chunk_block_batches = split_list_into_chunk(chunk_block_content_list, max_num_chunk = num_cpus)
 
         # Register the computation at remote nodes...
         futures = [parse_chunks.remote(batch) for batch in chunk_block_batches]
