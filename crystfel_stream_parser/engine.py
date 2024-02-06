@@ -15,8 +15,6 @@ class StreamParser:
         self.peak_pattern_dict  = None
         self.init_regex()
 
-        self.stream_record_list = []
-
 
     def init_regex(self):
         # Macro regex to parse blocks...
@@ -259,4 +257,4 @@ class StreamParser:
 
         ray.shutdown()
 
-        self.stream_record_list = stream_record_list
+        return stream_record_list
