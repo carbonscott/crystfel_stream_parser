@@ -125,8 +125,9 @@ class StreamParser:
     def parse(self, num_cpus = 2):
         # Shutdown ray clients during a Ctrl+C event...
         def signal_handler(sig, frame):
-            print('SIGINT (Ctrl+C) caught, shutting down Ray...')
-            ray.shutdown()
+            if ray.is_initialized():
+                print('SIGINT (Ctrl+C) caught, shutting down Ray...')
+                ray.shutdown()
             sys.exit(0)
 
         signal.signal(signal.SIGINT, signal_handler)
