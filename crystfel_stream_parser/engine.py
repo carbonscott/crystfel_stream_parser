@@ -213,7 +213,21 @@ class StreamParser:
 
 
     def parse_one_geom(self, geom_block_content):
-        return geom_block_content
+        kv_pattern_dict = self.kv_pattern_dict
+
+        # Extract key-value pairs (represented by both : and =)...
+        geom_kv_record = {}
+        for delimiter, kv_pattern in kv_pattern_dict.items():
+            kv_pattern = kv_pattern_dict[delimiter]
+            for kv_match in regex.finditer(kv_pattern, geom_block_content):
+                capture_dict = kv_match.capturesdict()
+
+                k = capture_dict['LEFT'][0]
+                v = capture_dict['RIGHT'][0]
+
+                geom_kv_record[k] = v
+
+        return geom_kv_record
 
 
     def parse_one_block(self, stream_block_content):
