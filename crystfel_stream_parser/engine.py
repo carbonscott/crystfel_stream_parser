@@ -19,9 +19,9 @@ class StreamParser:
     def init_regex(self):
         # Macro regex to parse blocks...
         block_pattern_dict = {
-            'geometry'            : regex.compile( r"(?s)----- Begin geometry file -----\n(?P<BLOCK>.*?)\n----- End geometry file -----" ),
+            'geometry'            : regex.compile( r"(?s)----- Begin geometry file -----\n(?P<GEOM_BLOCK>.*?)\n----- End geometry file -----" ),
 
-            'chunk'               : regex.compile( r"(?s)----- Begin chunk -----\n(?P<BLOCK>.*?)\n----- End chunk -----" ),
+            'chunk'               : regex.compile( r"(?s)----- Begin chunk -----\n(?P<CHUNK_BLOCK>.*?)\n----- End chunk -----" ),
             'found peak meta'     : regex.compile( r"(?s)(?P<BLOCK>.*?)Peaks from peak search" ),
             'found peak'          : regex.compile( r"(?s)Peaks from peak search\n(?P<BLOCK>.*?)\nEnd of peak list" ),
 
@@ -212,6 +212,23 @@ class StreamParser:
         return stream_record
 
 
+    def parse_one_geom(self, geom_block_content):
+        return geom_block_content
+
+
+    def parse_one_block(self, stream_block_content):
+        chunk_block = stream_block_content['CHUNK_BLOCK']
+        geom_block  = stream_block_content['GEOM_BLOCK' ]
+
+        chunk_record = self.parse_one_chunk(chunk_block[0]) if len(chunk_block) > 0 else {}
+        geom_record  = self.parse_one_geom ( geom_block[0]) if len( geom_block) > 0 else {}
+
+        record = { 'GEOM_BLOCK' : geom_record,
+                   'CHUNK_BLOCK': chunk_record, }
+
+        return record
+
+
     def parse(self, num_cpus = 2):
         # Shutdown ray clients during a Ctrl+C event...
         def signal_handler(sig, frame):
@@ -233,26 +250,31 @@ class StreamParser:
 
         # Define the work load for each worker...
         @ray.remote
-        def parse_chunks(chunks):
-            stream_record_list = []
-            for chunk in chunks:
-                stream_record = self.parse_one_chunk(chunk)
-                stream_record_list.append(stream_record)
-            return stream_record_list
+        def parse_blocks(blocks):
+            '''
+            Arguments:
+                - blocks: a list of [(block_idx, block_content),...].
+            '''
+            stream_record_dict = {}
+            for block_idx, block_content in blocks:
+                stream_record = self.parse_one_block(block_content)
+                stream_record_dict[block_idx] = stream_record
+            return stream_record_dict
 
         with open(path_stream,'r') as fh:
             data = fh.read()
 
-        chunk_block_content_list = [ match.capturesdict()['BLOCK'][0] for match in regex.finditer(block_pattern_dict['chunk'], data) ]
-        chunk_block_batches = split_list_into_chunk(chunk_block_content_list, max_num_chunk = num_cpus)
+        # Match either a chunk block or a geom block...
+        chunk_or_geom = [f"({block_pattern_dict['chunk'].pattern})", f"({block_pattern_dict['geometry'].pattern})"]
+        chunk_or_geom_pattern = '|'.join(chunk_or_geom)
+        chunk_or_geom_block_content_list = [ (block_idx, match.capturesdict()) for block_idx, match in enumerate(regex.finditer(chunk_or_geom_pattern, data)) ]
 
-        # Register the computation at remote nodes...
-        futures = [parse_chunks.remote(batch) for batch in chunk_block_batches]
+        block_batches = split_list_into_chunk(chunk_or_geom_block_content_list, max_num_chunk = num_cpus)
 
-        ## # Collect results...
-        ## stream_record_list = ray.get(futures)
+        # Submit the computation jobs at remote nodes...
+        futures = [parse_blocks.remote(blocks) for blocks in block_batches]
 
-        stream_record_list = []
+        stream_record_dict = {}
         remaining_futures = futures
         while remaining_futures:
             # Wait for at least one task to be ready
@@ -260,9 +282,9 @@ class StreamParser:
 
             # Fetch the result of the ready task(s)
             for future in ready_futures:
-                stream_record_list_per_worker = ray.get(future)
-                stream_record_list.extend(stream_record_list_per_worker)
+                stream_record_dict_per_worker = ray.get(future)
+                stream_record_dict.update(stream_record_dict_per_worker)
 
         ray.shutdown()
 
-        return stream_record_list
+        return stream_record_dict
