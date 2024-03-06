@@ -122,6 +122,96 @@ class StreamParser:
         self.peak_pattern_dict  = peak_pattern_dict
 
 
+    def parse_one_chunk(self, chunk_block_content):
+        block_pattern_dict = self.block_pattern_dict
+        kv_pattern_dict    = self.kv_pattern_dict
+        peak_pattern_dict  = self.peak_pattern_dict
+
+        # Enter 'found peak meta' block...
+        chunk_kv_record = {}
+        match = regex.search(block_pattern_dict['found peak meta'], chunk_block_content)
+        if match is not None:
+            # Extract key-value pairs (represented by both : and =)...
+            capture_dict = match.capturesdict()
+            content = capture_dict['BLOCK'][0]
+            for delimiter, kv_pattern in kv_pattern_dict.items():
+                kv_pattern = kv_pattern_dict[delimiter]
+                for kv_match in regex.finditer(kv_pattern, content):
+                    capture_dict = kv_match.capturesdict()
+
+                    k = capture_dict['LEFT'][0]
+                    v = capture_dict['RIGHT'][0]
+
+                    chunk_kv_record[k] = v
+
+        # Enter 'found peak' block...
+        found_peak_dict = {}
+        match = regex.search(block_pattern_dict['found peak'], chunk_block_content)
+        if match is not None:
+            # Extract peak info...
+            capture_dict = match.capturesdict()
+            content = capture_dict['BLOCK'][0]
+            for match in regex.finditer(peak_pattern_dict['found peak'], content):
+                capture_dict = match.capturesdict()
+                pixel_info   = capture_dict['FLOAT']
+                pixel_info   = [ float(info) for info in pixel_info ]
+                det_panel    = capture_dict['DET_PANEL'][0]
+                if det_panel not in found_peak_dict: found_peak_dict[det_panel] = []
+                found_peak_dict[det_panel].append(pixel_info)
+
+        # Enter 'crystal' block...
+        crystal_list = []
+        for match in regex.finditer(block_pattern_dict['crystal'], chunk_block_content):
+            capture_dict = match.capturesdict()
+            crystal_block_content = capture_dict['BLOCK'][0]
+
+            # Enter 'predicted peak meta' block...
+            kv_record = {}
+            match = regex.search(block_pattern_dict['predicted peak meta'], crystal_block_content)
+            if match is not None:
+                # Extract key-value pairs (represented by both : and =)...
+                capture_dict = match.capturesdict()
+                content = capture_dict['BLOCK'][0]
+                for delimiter, kv_pattern in kv_pattern_dict.items():
+                    kv_pattern = kv_pattern_dict[delimiter]
+                    for kv_match in regex.finditer(kv_pattern, content):
+                        capture_dict = kv_match.capturesdict()
+
+                        k = capture_dict['LEFT'][0]
+                        v = capture_dict['RIGHT'][0]
+
+                        kv_record[k] = v
+
+            # Enter 'predicted peak' block...
+            predicted_peak_dict = {}
+            match = regex.search(block_pattern_dict['predicted peak'], crystal_block_content)
+            if match is not None:
+                # Extract peak info...
+                capture_dict = match.capturesdict()
+                content = capture_dict['BLOCK'][0]
+                for match in regex.finditer(peak_pattern_dict['predicted peak'], content):
+                    capture_dict = match.capturesdict()
+                    pixel_info   = capture_dict['FLOAT']
+                    pixel_info   = [ float(info) for info in pixel_info ]
+                    det_panel    = capture_dict['DET_PANEL'][0]
+                    if det_panel not in predicted_peak_dict: predicted_peak_dict[det_panel] = []
+                    predicted_peak_dict[det_panel].append(pixel_info)
+
+            crystal_list.append({
+                'metadata'        : kv_record,
+                'predicted peaks' : predicted_peak_dict,
+            })
+
+
+        stream_record = {
+            'metadata'    : chunk_kv_record,
+            'found peaks' : found_peak_dict,
+            'crystal'     : crystal_list,
+        }
+
+        return stream_record
+
+
     def parse(self, num_cpus = 2):
         # Shutdown ray clients during a Ctrl+C event...
         def signal_handler(sig, frame):
@@ -141,98 +231,12 @@ class StreamParser:
         kv_pattern_dict    = self.kv_pattern_dict
         peak_pattern_dict  = self.peak_pattern_dict
 
-        # Define subroutine to process one chunk...
-        def parse_one_chunk(chunk_block_content):
-            # Enter 'found peak meta' block...
-            chunk_kv_record = {}
-            match = regex.search(block_pattern_dict['found peak meta'], chunk_block_content)
-            if match is not None:
-                # Extract key-value pairs (represented by both : and =)...
-                capture_dict = match.capturesdict()
-                content = capture_dict['BLOCK'][0]
-                for delimiter, kv_pattern in kv_pattern_dict.items():
-                    kv_pattern = kv_pattern_dict[delimiter]
-                    for kv_match in regex.finditer(kv_pattern, content):
-                        capture_dict = kv_match.capturesdict()
-
-                        k = capture_dict['LEFT'][0]
-                        v = capture_dict['RIGHT'][0]
-
-                        chunk_kv_record[k] = v
-
-            # Enter 'found peak' block...
-            found_peak_dict = {}
-            match = regex.search(block_pattern_dict['found peak'], chunk_block_content)
-            if match is not None:
-                # Extract peak info...
-                capture_dict = match.capturesdict()
-                content = capture_dict['BLOCK'][0]
-                for match in regex.finditer(peak_pattern_dict['found peak'], content):
-                    capture_dict = match.capturesdict()
-                    pixel_info   = capture_dict['FLOAT']
-                    pixel_info   = [ float(info) for info in pixel_info ]
-                    det_panel    = capture_dict['DET_PANEL'][0]
-                    if det_panel not in found_peak_dict: found_peak_dict[det_panel] = []
-                    found_peak_dict[det_panel].append(pixel_info)
-
-            # Enter 'crystal' block...
-            crystal_list = []
-            for match in regex.finditer(block_pattern_dict['crystal'], chunk_block_content):
-                capture_dict = match.capturesdict()
-                crystal_block_content = capture_dict['BLOCK'][0]
-
-                # Enter 'predicted peak meta' block...
-                kv_record = {}
-                match = regex.search(block_pattern_dict['predicted peak meta'], crystal_block_content)
-                if match is not None:
-                    # Extract key-value pairs (represented by both : and =)...
-                    capture_dict = match.capturesdict()
-                    content = capture_dict['BLOCK'][0]
-                    for delimiter, kv_pattern in kv_pattern_dict.items():
-                        kv_pattern = kv_pattern_dict[delimiter]
-                        for kv_match in regex.finditer(kv_pattern, content):
-                            capture_dict = kv_match.capturesdict()
-
-                            k = capture_dict['LEFT'][0]
-                            v = capture_dict['RIGHT'][0]
-
-                            kv_record[k] = v
-
-                # Enter 'predicted peak' block...
-                predicted_peak_dict = {}
-                match = regex.search(block_pattern_dict['predicted peak'], crystal_block_content)
-                if match is not None:
-                    # Extract peak info...
-                    capture_dict = match.capturesdict()
-                    content = capture_dict['BLOCK'][0]
-                    for match in regex.finditer(peak_pattern_dict['predicted peak'], content):
-                        capture_dict = match.capturesdict()
-                        pixel_info   = capture_dict['FLOAT']
-                        pixel_info   = [ float(info) for info in pixel_info ]
-                        det_panel    = capture_dict['DET_PANEL'][0]
-                        if det_panel not in predicted_peak_dict: predicted_peak_dict[det_panel] = []
-                        predicted_peak_dict[det_panel].append(pixel_info)
-
-                crystal_list.append({
-                    'metadata'        : kv_record,
-                    'predicted peaks' : predicted_peak_dict,
-                })
-
-
-            stream_record = {
-                'metadata'    : chunk_kv_record,
-                'found peaks' : found_peak_dict,
-                'crystal'     : crystal_list,
-            }
-
-            return stream_record
-
         # Define the work load for each worker...
         @ray.remote
         def parse_chunks(chunks):
             stream_record_list = []
             for chunk in chunks:
-                stream_record = parse_one_chunk(chunk)
+                stream_record = self.parse_one_chunk(chunk)
                 stream_record_list.append(stream_record)
             return stream_record_list
 
@@ -244,6 +248,9 @@ class StreamParser:
 
         # Register the computation at remote nodes...
         futures = [parse_chunks.remote(batch) for batch in chunk_block_batches]
+
+        ## # Collect results...
+        ## stream_record_list = ray.get(futures)
 
         stream_record_list = []
         remaining_futures = futures
