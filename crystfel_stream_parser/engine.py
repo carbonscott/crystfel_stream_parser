@@ -301,4 +301,14 @@ class StreamParser:
 
         ray.shutdown()
 
+        # Go through the dictionary in order (according to block_idx) and assign geom block reference to all chunk block...
+        valid_geom_block = {}
+        for block_idx in sorted(stream_record_dict.keys()):
+            record = stream_record_dict[block_idx]
+
+            if len(record['GEOM_BLOCK']) > 0:
+                valid_geom_block = record['GEOM_BLOCK']
+            else:
+                record['GEOM_BLOCK'] = valid_geom_block
+
         return stream_record_dict
