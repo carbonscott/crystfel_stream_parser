@@ -6,7 +6,7 @@ class CheetahConverter:
 
     def __init__(self, geom_block):
         '''
-        A sample geom_block:
+        A sample geom_block (Dict):
         {
             'q0a0/min_fs': '0',
             'q0a0/min_ss': '0',
@@ -86,7 +86,7 @@ class CheetahConverter:
                     (?:corner_x)
                 |   (?:corner_y)
                 )
-                (?<VALUE> 
+                (?<VALUE>
                     [-+]?         # Match a sign
                     (?>\d+)       # Match integer part
                     (?:\.\d*)?    # Match decimal part
@@ -138,7 +138,7 @@ class CheetahConverter:
                         'fs' : None,
                         'ss' : None,
                     }
-                geom_dict['panel_orient'][panel][coord] = (float(val_y), float(val_x))
+                geom_dict['panel_orient'][panel][coord] = (float(val_x), float(val_y))
 
             # Match a geom object...
             m = panel_corner_pattern.match(line)
@@ -161,24 +161,24 @@ class CheetahConverter:
         panel_to_idx = {}
         cheetah2psana_geom_dict = {}
         for panel_idx, (panel_str, panel_minmax) in enumerate(geom_dict['panel_minmax'].items()):
-            x_min = panel_minmax['min_fs']
-            y_min = panel_minmax['min_ss']
-            x_max = panel_minmax['max_fs']
-            y_max = panel_minmax['max_ss']
+            min_fs = panel_minmax['min_fs']
+            min_ss = panel_minmax['min_ss']
+            max_fs = panel_minmax['max_fs']
+            max_ss = panel_minmax['max_ss']
 
-            x_max += 1
-            y_max += 1
+            max_fs += 1
+            max_ss += 1
 
             idx_to_panel[panel_idx] = panel_str
             panel_to_idx[panel_str] = panel_idx
             panel_key = panel_str
-            if panel_key not in cheetah2psana_geom_dict: cheetah2psana_geom_dict[panel_key] = [x_min, y_min, x_max, y_max]
-            panel_x_min, panel_y_min, panel_x_max, panel_y_max = cheetah2psana_geom_dict[panel_key]
-            panel_x_min = min(panel_x_min, x_min)
-            panel_y_min = min(panel_y_min, y_min)
-            panel_x_max = max(panel_x_max, x_max)
-            panel_y_max = max(panel_y_max, y_max)
-            cheetah2psana_geom_dict[panel_key] = panel_x_min, panel_y_min, panel_x_max, panel_y_max
+            if panel_key not in cheetah2psana_geom_dict: cheetah2psana_geom_dict[panel_key] = [min_fs, min_ss, max_fs, max_ss]
+            panel_min_fs, panel_min_ss, panel_max_fs, panel_max_ss = cheetah2psana_geom_dict[panel_key]
+            panel_min_fs = min(panel_min_fs, min_fs)
+            panel_min_ss = min(panel_min_ss, min_ss)
+            panel_max_fs = max(panel_max_fs, max_fs)
+            panel_max_ss = max(panel_max_ss, max_ss)
+            cheetah2psana_geom_dict[panel_key] = panel_min_fs, panel_min_ss, panel_max_fs, panel_max_ss
 
         self.geom_dict    = geom_dict
         self.idx_to_panel = idx_to_panel
@@ -190,12 +190,12 @@ class CheetahConverter:
         W_cheetah, H_cheetah = list(self.cheetah2psana_geom_dict.values())[-1][-2:]
         cheetah_img = np.zeros((H_cheetah, W_cheetah), dtype = np.float32)
 
-        # for (panel_idx, panel_str), (x_min, y_min, x_max, y_max) in enumerate(self.cheetah2psana_geom_dict.items()):
-        for panel_str, (x_min, y_min, x_max, y_max) in self.cheetah2psana_geom_dict.items():
-            H = y_max - y_min
-            W = x_max - x_min
+        # for (panel_idx, panel_str), (min_fs, min_ss, max_fs, max_ss) in enumerate(self.cheetah2psana_geom_dict.items()):
+        for panel_str, (min_fs, min_ss, max_fs, max_ss) in self.cheetah2psana_geom_dict.items():
+            H = max_ss - min_ss
+            W = max_fs - min_fs
             panel_idx = self.panel_to_idx[panel_str]
-            cheetah_img[y_min:y_max, x_min:x_max] = img[panel_idx, 0:H, 0:W]
+            cheetah_img[min_ss:max_ss, min_fs:max_fs] = img[panel_idx, 0:H, 0:W]
 
         return cheetah_img
 
@@ -205,17 +205,17 @@ class CheetahConverter:
         C = len(self.cheetah2psana_geom_dict)
 
         # Figure out spatial dimension...
-        x_min, y_min, x_max, y_max = next(iter(self.cheetah2psana_geom_dict.values()))
-        H = y_max - y_min
-        W = x_max - x_min
+        min_fs, min_ss, max_fs, max_ss = next(iter(self.cheetah2psana_geom_dict.values()))
+        H = max_ss - min_ss
+        W = max_fs - min_fs
 
         # Initialize a zero value image...
         img = np.zeros((C, H, W), dtype = np.float32)
 
-        # for (panel_idx, panel_str), (x_min, y_min, x_max, y_max) in self.cheetah2psana_geom_dict.items():
-        for panel_str, (x_min, y_min, x_max, y_max) in self.cheetah2psana_geom_dict.items():
+        # for (panel_idx, panel_str), (min_fs, min_ss, max_fs, max_ss) in self.cheetah2psana_geom_dict.items():
+        for panel_str, (min_fs, min_ss, max_fs, max_ss) in self.cheetah2psana_geom_dict.items():
             panel_idx = self.panel_to_idx[panel_str]
-            img[panel_idx] = cheetah_img[y_min:y_max, x_min:x_max]
+            img[panel_idx] = cheetah_img[min_ss:max_ss, min_fs:max_fs]
 
         return img
 
@@ -231,9 +231,9 @@ class CheetahConverter:
 
     def convert_to_cheetah_coord(self, idx_panel, y, x):
         panel_str = self.id_to_panel(idx_panel)
-        x_min, y_min, x_max, y_max = self.cheetah2psana_geom_dict[panel_str]
+        min_fs, min_ss, max_fs, max_ss = self.cheetah2psana_geom_dict[panel_str]
 
-        x += x_min
-        y += y_min
+        x += min_fs
+        y += min_ss
 
         return idx_panel, y, x
