@@ -58,12 +58,12 @@ class CheetahConverter:
                     (?:fs)
                 |   (?:ss)
                 )
-                (?<VALUE_X> 
+                (?<VALUE_X>
                     [-+]?         # Match a sign
                     (?>\d+)       # Match integer part
                     (?:\.\d*)?    # Match decimal part
                 )
-                (?<VALUE_Y> 
+                (?<VALUE_Y>
                     [-+]?         # Match a sign
                     (?>\d+)       # Match integer part
                     (?:\.\d*)?    # Match decimal part
@@ -109,8 +109,8 @@ class CheetahConverter:
                 # Fetch values...
                 capture_dict = m.capturesdict()
                 panel = capture_dict['DET_PANEL'][0]
-                coord = capture_dict['COORD'][0]
-                value = capture_dict['VALUE'][0]
+                coord = capture_dict['COORD'    ][0]
+                value = capture_dict['VALUE'    ][0]
 
                 # Save values...
                 if not panel in geom_dict['panel_minmax']:
@@ -128,9 +128,9 @@ class CheetahConverter:
                 # Fetch values...
                 capture_dict = m.capturesdict()
                 panel = capture_dict['DET_PANEL'][0]
-                coord = capture_dict['COORD'][0]
-                val_x = capture_dict['VALUE_X'][0]
-                val_y = capture_dict['VALUE_Y'][0]
+                coord = capture_dict['COORD'    ][0]
+                val_x = capture_dict['VALUE_X'  ][0]
+                val_y = capture_dict['VALUE_Y'  ][0]
 
                 # Save values...
                 if not panel in geom_dict['panel_orient']:
@@ -172,7 +172,10 @@ class CheetahConverter:
             idx_to_panel[panel_idx] = panel_str
             panel_to_idx[panel_str] = panel_idx
             panel_key = panel_str
-            if panel_key not in cheetah2psana_geom_dict: cheetah2psana_geom_dict[panel_key] = [min_fs, min_ss, max_fs, max_ss]
+
+            if panel_key not in cheetah2psana_geom_dict:
+                cheetah2psana_geom_dict[panel_key] = [min_fs, min_ss, max_fs, max_ss]
+
             panel_min_fs, panel_min_ss, panel_max_fs, panel_max_ss = cheetah2psana_geom_dict[panel_key]
             panel_min_fs = min(panel_min_fs, min_fs)
             panel_min_ss = min(panel_min_ss, min_ss)
@@ -180,10 +183,58 @@ class CheetahConverter:
             panel_max_ss = max(panel_max_ss, max_ss)
             cheetah2psana_geom_dict[panel_key] = panel_min_fs, panel_min_ss, panel_max_fs, panel_max_ss
 
-        self.geom_dict    = geom_dict
-        self.idx_to_panel = idx_to_panel
-        self.panel_to_idx = panel_to_idx
+        self.geom_dict               = geom_dict
+        self.idx_to_panel            = idx_to_panel
+        self.panel_to_idx            = panel_to_idx
         self.cheetah2psana_geom_dict = cheetah2psana_geom_dict
+
+
+    def calculate_pixel_map(self, psana_img):
+        panel_orient = self.geom_dict['panel_orient']    # (x, y, z)
+        panel_corner = self.geom_dict['panel_corner']    # (x, y, z)
+        lab_coords_x = np.zeros_like(psana_img)
+        lab_coords_y = np.zeros_like(psana_img)
+
+        H, W = psana_img.shape[-2:]
+        ss_range = np.arange(H)
+        fs_range = np.arange(W)
+        ss_coords, fs_coords = np.meshgrid(ss_range, fs_range, indexing='ij')
+        original_coords = np.array([fs_coords, ss_coords])
+        for panel_idx, panel_img in enumerate(psana_img):
+            panel_str = self.idx_to_panel[panel_idx]
+
+            corner_x = panel_corner[panel_str]['corner_x']
+            corner_y = panel_corner[panel_str]['corner_y']
+            corner   = np.array([corner_x, corner_y]).reshape(2, -1)
+
+            ss_orient = panel_orient[panel_str]['ss']    # 'q0a0/fs': '+0.006140x +0.999981y',
+            fs_orient = panel_orient[panel_str]['fs']    # 'q0a0/ss': '-0.999981x +0.006140y',
+            transform_matrix = np.array([fs_orient, ss_orient]).transpose(1, 0)
+
+            lab_coords = np.matmul(transform_matrix, original_coords.reshape(-1, H*W)) + corner    # (C, C) @ (C, H*W) + (C, 1)
+            panel_lab_coords_x, panel_lab_coords_y = lab_coords.reshape(-1, H, W)    # (C, H*W) -> (C, H, W)
+
+            lab_coords_x[panel_idx] = panel_lab_coords_x
+            lab_coords_y[panel_idx] = panel_lab_coords_y
+
+        x_min_lab = np.round(lab_coords_x).astype(int).min()
+        y_min_lab = np.round(lab_coords_y).astype(int).min()
+
+        pixel_map_x = np.round(lab_coords_x - x_min_lab).astype(int)
+        pixel_map_y = np.round(lab_coords_y - y_min_lab).astype(int)
+
+        return pixel_map_x, pixel_map_y
+
+
+    def convert_to_detector_img(self, img):
+        psana_img = self.convert_to_psana_img(img)
+        pixel_map_x, pixel_map_y = self.calculate_pixel_map(psana_img)
+
+        asmb_img  = np.zeros((pixel_map_x.max() - pixel_map_x.min() + 1,
+                              pixel_map_y.max() - pixel_map_x.min() + 1))
+        asmb_img[pixel_map_x, pixel_map_y] = psana_img
+
+        return asmb_img
 
 
     def convert_to_cheetah_img(self, img):
