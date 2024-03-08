@@ -49,6 +49,9 @@ class CheetahConverter:
             (?> (?&DET_PANEL) / ) (?&COORD)
             \s = \s    # Match a equal sign with blank spaces on both sides
             (?&VALUE_X) x \s (?&VALUE_Y) y  # Match the value of the coordinate
+            (   # Optional z component
+                (?&VALUE_Z) z \s?
+            )?
 
             (?(DEFINE)
                 (?<DET_PANEL>
@@ -64,6 +67,11 @@ class CheetahConverter:
                     (?:\.\d*)?    # Match decimal part
                 )
                 (?<VALUE_Y>
+                    [-+]?         # Match a sign
+                    (?>\d+)       # Match integer part
+                    (?:\.\d*)?    # Match decimal part
+                )
+                (?<VALUE_Z>
                     [-+]?         # Match a sign
                     (?>\d+)       # Match integer part
                     (?:\.\d*)?    # Match decimal part
@@ -85,6 +93,7 @@ class CheetahConverter:
                 (?<COORD>
                     (?:corner_x)
                 |   (?:corner_y)
+                |   (?:corner_z)
                 )
                 (?<VALUE>
                     [-+]?         # Match a sign
@@ -131,6 +140,7 @@ class CheetahConverter:
                 coord = capture_dict['COORD'    ][0]
                 val_x = capture_dict['VALUE_X'  ][0]
                 val_y = capture_dict['VALUE_Y'  ][0]
+                val_z = capture_dict['VALUE_Z'  ][0] if len(capture_dict['VALUE_Z']) > 0 else 0
 
                 # Save values...
                 if not panel in geom_dict['panel_orient']:
@@ -138,7 +148,7 @@ class CheetahConverter:
                         'fs' : None,
                         'ss' : None,
                     }
-                geom_dict['panel_orient'][panel][coord] = (float(val_x), float(val_y))
+                geom_dict['panel_orient'][panel][coord] = (float(val_x), float(val_y), float(val_z))
 
             # Match a geom object...
             m = panel_corner_pattern.match(line)
@@ -154,6 +164,7 @@ class CheetahConverter:
                     geom_dict['panel_corner'][panel] = {
                         'corner_x' : None,
                         'corner_y' : None,
+                        'corner_z' : None,
                     }
                 geom_dict['panel_corner'][panel][coord] = float(value)
 
@@ -194,6 +205,7 @@ class CheetahConverter:
         panel_corner = self.geom_dict['panel_corner']    # (x, y, z)
         lab_coords_x = np.zeros_like(psana_img)
         lab_coords_y = np.zeros_like(psana_img)
+        lab_coords_z = np.zeros_like(psana_img)
 
         H, W = psana_img.shape[-2:]
         ss_range = np.arange(H)
@@ -205,34 +217,39 @@ class CheetahConverter:
 
             corner_x = panel_corner[panel_str]['corner_x']
             corner_y = panel_corner[panel_str]['corner_y']
-            corner   = np.array([corner_x, corner_y]).reshape(2, -1)
+            corner_z = panel_corner[panel_str]['corner_z'] if panel_corner[panel_str]['corner_z'] is not None else 0
+            corner   = np.array([corner_x, corner_y, corner_z]).reshape(-1, 1)
 
             ss_orient = panel_orient[panel_str]['ss']    # 'q0a0/fs': '+0.006140x +0.999981y',
             fs_orient = panel_orient[panel_str]['fs']    # 'q0a0/ss': '-0.999981x +0.006140y',
             transform_matrix = np.array([fs_orient, ss_orient]).transpose(1, 0)
 
-            lab_coords = np.matmul(transform_matrix, original_coords.reshape(-1, H*W)) + corner    # (C, C) @ (C, H*W) + (C, 1)
-            panel_lab_coords_x, panel_lab_coords_y = lab_coords.reshape(-1, H, W)    # (C, H*W) -> (C, H, W)
+            lab_coords = np.matmul(transform_matrix, original_coords.reshape(-1, H*W)) + corner    # (C, 2) @ (2, H*W) + (C, 1)
+            panel_lab_coords_x, panel_lab_coords_y, panel_lab_coords_z = lab_coords.reshape(-1, H, W)    # (C, H*W) -> (C, H, W)
 
             lab_coords_x[panel_idx] = panel_lab_coords_x
             lab_coords_y[panel_idx] = panel_lab_coords_y
+            lab_coords_z[panel_idx] = panel_lab_coords_z
 
         x_min_lab = np.round(lab_coords_x).astype(int).min()
         y_min_lab = np.round(lab_coords_y).astype(int).min()
+        z_min_lab = np.round(lab_coords_z).astype(int).min()
 
         pixel_map_x = np.round(lab_coords_x - x_min_lab).astype(int)
         pixel_map_y = np.round(lab_coords_y - y_min_lab).astype(int)
+        pixel_map_z = np.round(lab_coords_z - z_min_lab).astype(int)
 
-        return pixel_map_x, pixel_map_y
+        return pixel_map_x, pixel_map_y, pixel_map_z
 
 
     def convert_to_detector_img(self, img):
         psana_img = self.convert_to_psana_img(img)
-        pixel_map_x, pixel_map_y = self.calculate_pixel_map(psana_img)
+        pixel_map_x, pixel_map_y, pixel_map_z = self.calculate_pixel_map(psana_img)
 
         asmb_img  = np.zeros((pixel_map_x.max() - pixel_map_x.min() + 1,
-                              pixel_map_y.max() - pixel_map_x.min() + 1))
-        asmb_img[pixel_map_x, pixel_map_y] = psana_img
+                              pixel_map_y.max() - pixel_map_y.min() + 1,
+                              pixel_map_z.max() - pixel_map_z.min() + 1,))
+        asmb_img[pixel_map_x, pixel_map_y, pixel_map_z] = psana_img
 
         return asmb_img
 
