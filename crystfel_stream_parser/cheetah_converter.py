@@ -231,14 +231,6 @@ class CheetahConverter:
             lab_coords_y[panel_idx] = panel_lab_coords_y
             lab_coords_z[panel_idx] = panel_lab_coords_z
 
-        ## x_min_lab = np.round(lab_coords_x).astype(int).min()
-        ## y_min_lab = np.round(lab_coords_y).astype(int).min()
-        ## z_min_lab = np.round(lab_coords_z).astype(int).min()
-
-        ## pixel_map_x = np.round(lab_coords_x - x_min_lab).astype(int)
-        ## pixel_map_y = np.round(lab_coords_y - y_min_lab).astype(int)
-        ## pixel_map_z = np.round(lab_coords_z - z_min_lab).astype(int)
-
         x_min_lab = lab_coords_x.min()
         y_min_lab = lab_coords_y.min()
         z_min_lab = lab_coords_z.min()
