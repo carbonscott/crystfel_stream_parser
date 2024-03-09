@@ -2,6 +2,7 @@ import regex
 import signal
 import sys
 import ray
+import copy
 
 from .utils import split_list_into_chunk
 
@@ -301,14 +302,31 @@ class StreamParser:
 
         ray.shutdown()
 
-        # Go through the dictionary in order (according to block_idx) and assign geom block reference to all chunk block...
-        valid_geom_block = {}
+        # Prune the stream graph to only save chunks...
+        chunk_record_idx  = 0
+        chunk_record_dict = {}
+        valid_geom_block  = None
+        uses_copy         = True
+        is_ref            = True
         for block_idx in sorted(stream_record_dict.keys()):
             record = stream_record_dict[block_idx]
 
+            # Cache the geom block???
             if len(record['GEOM_BLOCK']) > 0:
                 valid_geom_block = record['GEOM_BLOCK']
-            else:
-                record['GEOM_BLOCK'] = valid_geom_block
+                uses_copy = True
+                is_ref    = True
 
-        return stream_record_dict
+            # Save the chunk directly following a geom block saves the raw and functions as a reference...
+            else:
+                if uses_copy:
+                    valid_geom_block = copy.deepcopy(valid_geom_block)
+                    uses_copy = False
+                record['GEOM_BLOCK' ] = valid_geom_block
+                record['IS_REF_GEOM_BLOCK'] = is_ref
+                if is_ref: is_ref = False
+
+                chunk_record_dict[chunk_record_idx] = record
+                chunk_record_idx += 1
+
+        return chunk_record_dict
