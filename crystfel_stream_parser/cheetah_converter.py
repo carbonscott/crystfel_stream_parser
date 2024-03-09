@@ -200,6 +200,31 @@ class CheetahConverter:
         self.cheetah2psana_geom_dict = cheetah2psana_geom_dict
 
 
+    def get_transform_matrix(self):
+        panel_orient = self.geom_dict['panel_orient']    # (x, y, z)
+
+        transform_matrix = {}
+        for panel_str, orient in panel_orient.items():
+            ss_orient = orient['ss']    # 'q0a0/fs': '+0.006140x +0.999981y',
+            fs_orient = orient['fs']    # 'q0a0/ss': '-0.999981x +0.006140y',
+            transform_matrix[panel_str] = np.array([fs_orient, ss_orient]).transpose(1, 0)
+
+        return transform_matrix
+
+
+    def get_transform_bias(self):
+        panel_corner = self.geom_dict['panel_corner']    # (x, y, z)
+
+        transform_bias = {}
+        for panel_str, corner in panel_corner.items():
+            corner_x = corner['corner_x']
+            corner_y = corner['corner_y']
+            corner_z = corner['corner_z'] if corner['corner_z'] is not None else 0
+            transform_bias[panel_str] = np.array([corner_x, corner_y, corner_z]).reshape(-1, 1)
+
+        return transform_bias
+
+
     def calculate_pixel_map(self, psana_img):
         panel_orient = self.geom_dict['panel_orient']    # (x, y, z)
         panel_corner = self.geom_dict['panel_corner']    # (x, y, z)
