@@ -267,6 +267,14 @@ class CheetahConverter:
         return pixel_map_x, pixel_map_y, pixel_map_z
 
 
+    def convert_pixel_map_from_psana_to_cheetah(self, psana_pixel_map):
+        '''
+        Arguments:
+            psana_pixel_map: (P, H, W), ss aligns with H direction.
+        '''
+        return self.convert_to_cheetah_img(psana_pixel_map)
+
+
     def convert_to_detector_img(self, img):
         '''
         Pixel map will be rounded for visualization.
@@ -329,7 +337,7 @@ class CheetahConverter:
 
 
     def convert_to_cheetah_coord(self, idx_panel, y, x):
-        panel_str = self.id_to_panel(idx_panel)
+        panel_str = self.idx_to_panel[idx_panel]
         min_fs, min_ss, max_fs, max_ss = self.cheetah2psana_geom_dict[panel_str]
 
         x += min_fs
