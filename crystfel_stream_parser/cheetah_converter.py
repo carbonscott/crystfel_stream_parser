@@ -231,21 +231,35 @@ class CheetahConverter:
             lab_coords_y[panel_idx] = panel_lab_coords_y
             lab_coords_z[panel_idx] = panel_lab_coords_z
 
-        x_min_lab = np.round(lab_coords_x).astype(int).min()
-        y_min_lab = np.round(lab_coords_y).astype(int).min()
-        z_min_lab = np.round(lab_coords_z).astype(int).min()
+        ## x_min_lab = np.round(lab_coords_x).astype(int).min()
+        ## y_min_lab = np.round(lab_coords_y).astype(int).min()
+        ## z_min_lab = np.round(lab_coords_z).astype(int).min()
 
-        pixel_map_x = np.round(lab_coords_x - x_min_lab).astype(int)
-        pixel_map_y = np.round(lab_coords_y - y_min_lab).astype(int)
-        pixel_map_z = np.round(lab_coords_z - z_min_lab).astype(int)
+        ## pixel_map_x = np.round(lab_coords_x - x_min_lab).astype(int)
+        ## pixel_map_y = np.round(lab_coords_y - y_min_lab).astype(int)
+        ## pixel_map_z = np.round(lab_coords_z - z_min_lab).astype(int)
+
+        x_min_lab = lab_coords_x.min()
+        y_min_lab = lab_coords_y.min()
+        z_min_lab = lab_coords_z.min()
+
+        pixel_map_x = lab_coords_x - x_min_lab
+        pixel_map_y = lab_coords_y - y_min_lab
+        pixel_map_z = lab_coords_z - z_min_lab
 
         return pixel_map_x, pixel_map_y, pixel_map_z
 
 
     def convert_to_detector_img(self, img):
+        '''
+        Pixel map will be rounded for visualization.
+        '''
         psana_img = self.convert_to_psana_img(img)
         pixel_map_x, pixel_map_y, pixel_map_z = self.calculate_pixel_map(psana_img)
 
+        pixel_map_x = np.round(pixel_map_x).astype(int)
+        pixel_map_y = np.round(pixel_map_y).astype(int)
+        pixel_map_z = np.round(pixel_map_z).astype(int)
         asmb_img  = np.zeros((pixel_map_x.max() - pixel_map_x.min() + 1,
                               pixel_map_y.max() - pixel_map_y.min() + 1,
                               pixel_map_z.max() - pixel_map_z.min() + 1,))
