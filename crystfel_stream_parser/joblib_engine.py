@@ -244,7 +244,7 @@ class StreamParser:
         return record
 
 
-    def parse(self, num_cpus=2):
+    def parse(self, num_cpus=2, returns_stream_dict=False):
         # Shutdown joblib during a Ctrl+C event...
         def signal_handler(sig, frame):
             print('SIGINT (Ctrl+C) caught, shutting down...')
@@ -316,4 +316,4 @@ class StreamParser:
                 chunk_record_dict[chunk_record_idx] = record
                 chunk_record_idx += 1
 
-        return chunk_record_dict
+        return stream_record_dict if returns_stream_dict else chunk_record_dict
