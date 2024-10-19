@@ -4,7 +4,7 @@ import sys
 import ray
 import copy
 
-from .utils import split_list_into_chunk
+from more_itertools import divide
 
 class StreamParser:
 
@@ -284,7 +284,7 @@ class StreamParser:
         chunk_or_geom_pattern = '|'.join(chunk_or_geom)
         chunk_or_geom_block_content_list = [ (block_idx, match.capturesdict()) for block_idx, match in enumerate(regex.finditer(chunk_or_geom_pattern, data)) ]
 
-        block_batches = split_list_into_chunk(chunk_or_geom_block_content_list, max_num_chunk = num_cpus)
+        block_batches = divide(num_cpus, chunk_or_geom_block_content_list)
 
         # Submit the computation jobs at remote nodes...
         futures = [parse_blocks.remote(blocks) for blocks in block_batches]
