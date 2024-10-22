@@ -275,11 +275,11 @@ class CheetahConverter:
         return self.convert_to_cheetah_img(psana_pixel_map)
 
 
-    def convert_to_detector_img(self, img):
+    def convert_to_detector_img(self, cheetah_img):
         '''
         Pixel map will be rounded for visualization.
         '''
-        psana_img = self.convert_to_psana_img(img)
+        psana_img = self.convert_to_psana_img(cheetah_img)
         pixel_map_x, pixel_map_y, pixel_map_z = self.calculate_pixel_map(psana_img)
 
         pixel_map_x = np.round(pixel_map_x).astype(int)
@@ -293,19 +293,34 @@ class CheetahConverter:
         return asmb_img
 
 
-    def convert_to_cheetah_img(self, img):
-        W_cheetah, H_cheetah = list(self.cheetah2psana_geom_dict.values())[-1][-2:]
-        cheetah_img = np.zeros((H_cheetah, W_cheetah), dtype = np.float32)
+    def reduce_geom_to_p_level(self, data):
+        reduced = {}
+        for key, value in data.items():
+            p_level = key.split('a')[0]  # Extract the p-level (e.g., 'p0', 'p1', etc.)
 
-        # for (panel_idx, panel_str), (min_fs, min_ss, max_fs, max_ss) in enumerate(self.cheetah2psana_geom_dict.items()):
-        for panel_str, (min_fs, min_ss, max_fs, max_ss) in self.cheetah2psana_geom_dict.items():
+            if p_level not in reduced:
+                # Initialize with the first 'a0' entry
+                reduced[p_level] = list(value[:2]) + [0, 0]
+
+            # Update max values if this is an 'a3' entry
+            if key.endswith('a3'):
+                reduced[p_level][2:] = value[2:]
+
+        return reduced
+
+    def convert_to_cheetah_img(self, img):
+        geom_dict = self.cheetah2psana_geom_dict
+        geom_dict = self.reduce_geom_to_p_level(geom_dict)
+
+        W_cheetah, H_cheetah = list(geom_dict.values())[-1][-2:]
+        cheetah_img = np.zeros((H_cheetah, W_cheetah), dtype=np.float32)
+
+        for panel_idx, (min_fs, min_ss, max_fs, max_ss) in enumerate(geom_dict.values()):
             H = max_ss - min_ss
             W = max_fs - min_fs
-            panel_idx = self.panel_to_idx[panel_str]
             cheetah_img[min_ss:max_ss, min_fs:max_fs] = img[panel_idx, 0:H, 0:W]
 
         return cheetah_img
-
 
     def convert_to_psana_img(self, cheetah_img):
         # Figure out channel dimension...
@@ -328,17 +343,18 @@ class CheetahConverter:
 
 
     def convert_to_cheetah_coords(self, peaks_psana_list):
+        geom_dict = self.cheetah2psana_geom_dict
+        geom_dict = self.reduce_geom_to_p_level(geom_dict)
+
         peaks_cheetah_list = [
-            self.convert_to_cheetah_coord(idx_panel, y, x)
+            self.convert_to_cheetah_coord(idx_panel, y, x, geom_dict)
             for idx_panel, y, x in peaks_psana_list
         ]
 
         return peaks_cheetah_list
 
-
-    def convert_to_cheetah_coord(self, idx_panel, y, x):
-        panel_str = self.idx_to_panel[idx_panel]
-        min_fs, min_ss, max_fs, max_ss = self.cheetah2psana_geom_dict[panel_str]
+    def convert_to_cheetah_coord(self, idx_panel, y, x, geom_dict):
+        min_fs, min_ss, max_fs, max_ss = list(geom_dict.values())[idx_panel]
 
         x += min_fs
         y += min_ss
