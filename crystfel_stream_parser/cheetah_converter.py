@@ -328,9 +328,9 @@ class CheetahConverter:
 
         return reduced
 
-    def convert_to_cheetah_img(self, img):
+    def convert_to_cheetah_img(self, img, reduces_geom=False):
         geom_dict = self.cheetah2psana_geom_dict
-        geom_dict = self.reduce_geom_to_p_level(geom_dict)
+        if reduces_geom: geom_dict = self.reduce_geom_to_p_level(geom_dict)
 
         W_cheetah, H_cheetah = list(geom_dict.values())[-1][-2:]
         cheetah_img = np.zeros((H_cheetah, W_cheetah), dtype=np.float32)
